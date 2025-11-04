@@ -1,0 +1,181 @@
+name: Multi-Platform Release Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    permissions:
+      actions: write
+      checks: write
+      contents: write
+      deployments: write
+      issues: write
+      packages: write
+      pages: write
+      pull-requests: write
+      repository-projects: write
+      security-events: write
+      statuses: write
+
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            artifact_name: LinguaGacha-Windows
+          - os: macos-latest
+            platform: macos
+            artifact_name: LinguaGacha-macOS
+          - os: ubuntu-latest
+            platform: linux
+            artifact_name: LinguaGacha-Linux
+
+    steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.13
+
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Check Version
+      id: check_version
+      shell: bash
+      run: |
+        version=$(cat version.txt)
+        echo "version=$version" >> $GITHUB_OUTPUT
+
+    - name: Install Requirements
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install --upgrade setuptools
+        python -m pip install pyinstaller
+        python -m pip install -U -r requirements.txt
+        python -m pip cache purge
+
+    - name: Build with PyInstaller
+      shell: bash
+      run: |
+        python resource/pyinstaller.py
+
+    - name: Copy Files (Windows)
+      if: matrix.platform == 'windows'
+      shell: cmd
+      run: |
+        xcopy ".\version.txt" ".\dist\LinguaGacha\" /Q /Y
+        xcopy ".\resource\" ".\dist\LinguaGacha\resource\" /E /I /Q /H /Y
+
+        del /Q /F ".\dist\LinguaGacha\resource\7za.exe"
+        del /Q /F ".\dist\LinguaGacha\resource\pyinstaller.py"
+
+    - name: Copy Files (macOS/Linux)
+      if: matrix.platform != 'windows'
+      shell: bash
+      run: |
+        cp version.txt dist/LinguaGacha/
+        cp -r resource dist/LinguaGacha/
+
+        rm -f dist/LinguaGacha/resource/7za.exe
+        rm -f dist/LinguaGacha/resource/pyinstaller.py
+
+    - name: Compress Archive (Windows)
+      if: matrix.platform == 'windows'
+      shell: cmd
+      run: |
+        .\resource\7za.exe a -y -bt -mx5 ${{ matrix.artifact_name }}_${{ steps.check_version.outputs.version }}.zip .\dist\*
+
+    - name: Compress Archive (macOS/Linux)
+      if: matrix.platform != 'windows'
+      shell: bash
+      run: |
+        cd dist
+        zip -r ../${{ matrix.artifact_name }}_${{ steps.check_version.outputs.version }}.zip .
+        cd ..
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact_name }}_${{ steps.check_version.outputs.version }}
+        path: ${{ matrix.artifact_name }}_${{ steps.check_version.outputs.version }}.zip
+        retention-days: 30
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Check Version
+      id: check_version
+      shell: bash
+      run: |
+        version=$(cat version.txt)
+        echo "version=$version" >> $GITHUB_OUTPUT
+
+    - name: Download All Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: RELEASE_${{ steps.check_version.outputs.version }}_${{ github.run_number }}
+        release_name: LinguaGacha ${{ steps.check_version.outputs.version }} (Multi-Platform)
+        draft: true
+        prerelease: false
+        body: |
+          ## LinguaGacha ${{ steps.check_version.outputs.version }}
+
+          多平台发布版本
+
+          ### 支持平台
+          - ✅ Windows (x64)
+          - ✅ macOS (x64/ARM64)
+          - ✅ Linux (x64)
+
+          ### 下载说明
+          - Windows 用户：下载 `LinguaGacha-Windows_*.zip`
+          - macOS 用户：下载 `LinguaGacha-macOS_*.zip`
+          - Linux 用户：下载 `LinguaGacha-Linux_*.zip`
+
+    - name: Upload Windows Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./artifacts/LinguaGacha-Windows_${{ steps.check_version.outputs.version }}/LinguaGacha-Windows_${{ steps.check_version.outputs.version }}.zip
+        asset_name: LinguaGacha-Windows_${{ steps.check_version.outputs.version }}.zip
+        asset_content_type: application/zip
+
+    - name: Upload macOS Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./artifacts/LinguaGacha-macOS_${{ steps.check_version.outputs.version }}/LinguaGacha-macOS_${{ steps.check_version.outputs.version }}.zip
+        asset_name: LinguaGacha-macOS_${{ steps.check_version.outputs.version }}.zip
+        asset_content_type: application/zip
+
+    - name: Upload Linux Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./artifacts/LinguaGacha-Linux_${{ steps.check_version.outputs.version }}/LinguaGacha-Linux_${{ steps.check_version.outputs.version }}.zip
+        asset_name: LinguaGacha-Linux_${{ steps.check_version.outputs.version }}.zip
+        asset_content_type: application/zip
