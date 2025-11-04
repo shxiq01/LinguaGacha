@@ -152,6 +152,7 @@ class LocalizerEN(LocalizerZH):
     response_checker_line_error_empty_line: str = "Empty Line"
     response_checker_line_error_similarity: str = "High Similarity"
     response_checker_line_error_degradation: str = "Degradation Occurred"
+    response_checker_line_error_source_residue: str = "Source Language Residue"
     response_decoder_glossary_by_json: str = "Glossary data -> deserialization, total {COUNT} entries"
     response_decoder_glossary_by_rule: str = "Glossary data -> rule parsing after split, total {COUNT} entries"
     response_decoder_translation_by_json: str = "Translation data -> deserialization, total {COUNT} entries"

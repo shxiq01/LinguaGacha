@@ -24,6 +24,7 @@ class ResponseChecker(Base):
         LINE_ERROR_EMPTY_LINE = "LINE_ERROR_EMPTY_LINE"
         LINE_ERROR_SIMILARITY = "LINE_ERROR_SIMILARITY"
         LINE_ERROR_DEGRADATION = "LINE_ERROR_DEGRADATION"
+        LINE_ERROR_SOURCE_RESIDUE = "LINE_ERROR_SOURCE_RESIDUE"
 
     LINE_ERROR: tuple[StrEnum] = (
         Error.LINE_ERROR_KANA,
@@ -32,6 +33,7 @@ class ResponseChecker(Base):
         Error.LINE_ERROR_EMPTY_LINE,
         Error.LINE_ERROR_SIMILARITY,
         Error.LINE_ERROR_DEGRADATION,
+        Error.LINE_ERROR_SOURCE_RESIDUE,
     )
 
     # 重试次数阈值
@@ -39,6 +41,40 @@ class ResponseChecker(Base):
 
     # 退化检测规则
     RE_DEGRADATION = re.compile(r"(.{1,3})\1{16,}", flags = re.IGNORECASE)
+
+    @classmethod
+    def has_source_language_residue(cls, text: str, src_lang: BaseLanguage.Enum) -> bool:
+        """
+        检测译文中是否包含源语言字符
+
+        Args:
+            text: 待检测的译文
+            src_lang: 源语言
+
+        Returns:
+            True - 包含源语言字符残留
+            False - 不包含
+        """
+        if src_lang == BaseLanguage.Enum.ZH:
+            # 中文：检测是否包含汉字
+            return TextHelper.CJK.any_cjk(text)
+        elif src_lang == BaseLanguage.Enum.JA:
+            # 日语：检测是否包含假名
+            return TextHelper.JA.any_hiragana(text) or TextHelper.JA.any_katakana(text)
+        elif src_lang == BaseLanguage.Enum.KO:
+            # 韩语：检测是否包含谚文
+            return TextHelper.KO.any_hangeul(text)
+        elif src_lang == BaseLanguage.Enum.RU:
+            # 俄语：检测是否包含西里尔字母
+            return TextHelper.RU.any_ru(text)
+        elif src_lang == BaseLanguage.Enum.AR:
+            # 阿拉伯语：检测是否包含阿拉伯字母
+            return TextHelper.AR.any_ar(text)
+        elif src_lang == BaseLanguage.Enum.TH:
+            # 泰语：检测是否包含泰文字符
+            return TextHelper.TH.any_th(text)
+        # 其他语言暂不检测（拉丁字母系语言之间很难区分）
+        return False
 
     def __init__(self, config: Config, items: list[CacheItem]) -> None:
         super().__init__()
@@ -114,6 +150,12 @@ class ResponseChecker(Base):
             if self.config.source_language == BaseLanguage.Enum.KO and TextHelper.KO.any_hangeul(dst):
                 checks.append(__class__.Error.LINE_ERROR_HANGEUL)
                 continue
+
+            # 其他语言的源语言残留检测（中文、俄语、阿拉伯语、泰语等）
+            if self.config.source_language not in (BaseLanguage.Enum.JA, BaseLanguage.Enum.KO):
+                if __class__.has_source_language_residue(dst, self.config.source_language):
+                    checks.append(__class__.Error.LINE_ERROR_SOURCE_RESIDUE)
+                    continue
 
             # 判断是否包含或相似
             if src in dst or dst in src or TextHelper.check_similarity_by_jaccard(src, dst) > 0.80 == True:

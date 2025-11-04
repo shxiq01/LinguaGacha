@@ -43,10 +43,52 @@ class TranslatorTask(Base):
 
     # 启动任务
     def start(self, current_round: int) -> dict[str, str]:
-        return self.request(self.items, self.processors, self.precedings, self.local_flag, current_round)
+        """
+        启动翻译任务，带智能重试机制
+
+        重试策略：
+        - retry_count = 0: 正常翻译
+        - retry_count = 1: 强化提示词（明确禁止保留源语言）
+        - retry_count = 2: 降低 temperature（减少随机性）
+        - 3次都失败: 返回原文
+        """
+        MAX_RETRY = 3
+
+        for retry_count in range(MAX_RETRY):
+            # 执行翻译
+            result = self.request(
+                self.items,
+                self.processors,
+                self.precedings,
+                self.local_flag,
+                current_round,
+                retry_count
+            )
+
+            # 如果翻译成功（row_count > 0），返回结果
+            if result["row_count"] > 0:
+                return result
+
+            # 如果是最后一次重试失败，返回原文
+            if retry_count == MAX_RETRY - 1:
+                for item in self.items:
+                    item.set_dst(item.get_src())
+                    item.set_status(Base.TranslationStatus.TRANSLATED)
+
+                # 记录警告日志
+                self.warning(f"翻译失败（源语言残留），已重试 {MAX_RETRY} 次，返回原文")
+
+                return {
+                    "row_count": len(self.items),
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                }
+
+        # 理论上不会到达这里
+        return {"row_count": 0, "input_tokens": 0, "output_tokens": 0}
 
     # 请求
-    def request(self, items: list[CacheItem], processors: list[TextProcessor], precedings: list[CacheItem], local_flag: bool, current_round: int) -> dict[str, str]:
+    def request(self, items: list[CacheItem], processors: list[TextProcessor], precedings: list[CacheItem], local_flag: bool, current_round: int, retry_count: int = 0) -> dict[str, str]:
         # 任务开始的时间
         start_time = time.time()
 
@@ -77,6 +119,27 @@ class TranslatorTask(Base):
             self.messages, console_log = self.prompt_builder.generate_prompt(srcs, samples, precedings, local_flag)
         else:
             self.messages, console_log = self.prompt_builder.generate_prompt_sakura(srcs)
+
+        # 根据重试次数应用不同策略
+        if retry_count == 1:
+            # 第1次重试：强化提示词，明确禁止保留源语言
+            enhanced_suffix = (
+                "\n\n【重要】IMPORTANT: You MUST translate ALL text completely. "
+                "Do NOT leave ANY source language characters in the translation result. "
+                "必须完整翻译所有文本，译文中不得保留任何源语言字符。"
+            )
+            if isinstance(self.messages[-1].get("content"), str):
+                self.messages[-1]["content"] += enhanced_suffix
+            # 记录调试信息
+            self.debug(f"第 {retry_count + 1} 次尝试：应用强化提示词策略")
+
+        elif retry_count == 2:
+            # 第2次重试：降低 temperature，减少随机性
+            if "temperature" in self.platform:
+                original_temp = self.platform.get("temperature", 1.0)
+                self.platform["temperature"] = max(0.1, original_temp * 0.3)
+                # 记录调试信息
+                self.debug(f"第 {retry_count + 1} 次尝试：降低 temperature 至 {self.platform['temperature']}")
 
         # 发起请求
         requester = TaskRequester(self.config, self.platform, current_round)
@@ -344,5 +407,7 @@ class TranslatorTask(Base):
             return Localizer.get().response_checker_line_error_similarity
         elif error == ResponseChecker.Error.LINE_ERROR_DEGRADATION:
             return Localizer.get().response_checker_line_error_degradation
+        elif error == ResponseChecker.Error.LINE_ERROR_SOURCE_RESIDUE:
+            return Localizer.get().response_checker_line_error_source_residue
         else:
             return Localizer.get().response_checker_unknown

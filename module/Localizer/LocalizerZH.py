@@ -152,6 +152,7 @@ class LocalizerZH():
     response_checker_line_error_empty_line: str = "存在空行"
     response_checker_line_error_similarity: str = "较高相似度"
     response_checker_line_error_degradation: str = "发生退化现象"
+    response_checker_line_error_source_residue: str = "源语言残留"
     response_decoder_glossary_by_json: str = "术语数据 -> 反序列化，共 {COUNT} 条"
     response_decoder_glossary_by_rule: str = "术语数据 -> 拆分后规则解析，共 {COUNT} 条"
     response_decoder_translation_by_json: str = "翻译数据 -> 反序列化，共 {COUNT} 条"
