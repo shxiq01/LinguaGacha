@@ -57,7 +57,7 @@ class ResponseChecker(Base):
         """
         if src_lang == BaseLanguage.Enum.ZH:
             # 中文：检测是否包含汉字
-            return TextHelper.CJK.any_cjk(text)
+            return TextHelper.CJK.any(text)
         elif src_lang == BaseLanguage.Enum.JA:
             # 日语：检测是否包含假名
             return TextHelper.JA.any_hiragana(text) or TextHelper.JA.any_katakana(text)
@@ -66,13 +66,13 @@ class ResponseChecker(Base):
             return TextHelper.KO.any_hangeul(text)
         elif src_lang == BaseLanguage.Enum.RU:
             # 俄语：检测是否包含西里尔字母
-            return TextHelper.RU.any_ru(text)
+            return TextHelper.RU.any(text)
         elif src_lang == BaseLanguage.Enum.AR:
             # 阿拉伯语：检测是否包含阿拉伯字母
-            return TextHelper.AR.any_ar(text)
+            return TextHelper.AR.any(text)
         elif src_lang == BaseLanguage.Enum.TH:
             # 泰语：检测是否包含泰文字符
-            return TextHelper.TH.any_th(text)
+            return TextHelper.TH.any(text)
         # 其他语言暂不检测（拉丁字母系语言之间很难区分）
         return False
 
