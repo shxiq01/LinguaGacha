@@ -25,6 +25,7 @@ class ResponseChecker(Base):
         LINE_ERROR_SIMILARITY = "LINE_ERROR_SIMILARITY"
         LINE_ERROR_DEGRADATION = "LINE_ERROR_DEGRADATION"
         LINE_ERROR_SOURCE_RESIDUE = "LINE_ERROR_SOURCE_RESIDUE"
+        LINE_ERROR_GLOSSARY_VIOLATION = "LINE_ERROR_GLOSSARY_VIOLATION"
 
     LINE_ERROR: tuple[StrEnum] = (
         Error.LINE_ERROR_KANA,
@@ -34,10 +35,8 @@ class ResponseChecker(Base):
         Error.LINE_ERROR_SIMILARITY,
         Error.LINE_ERROR_DEGRADATION,
         Error.LINE_ERROR_SOURCE_RESIDUE,
+        Error.LINE_ERROR_GLOSSARY_VIOLATION,
     )
-
-    # 重试次数阈值
-    RETRY_COUNT_THRESHOLD: int = 2
 
     # 退化检测规则
     RE_DEGRADATION = re.compile(r"(.{1,3})\1{16,}", flags = re.IGNORECASE)
@@ -76,6 +75,37 @@ class ResponseChecker(Base):
         # 其他语言暂不检测（拉丁字母系语言之间很难区分）
         return False
 
+    def has_glossary_violation(self, src: str, dst: str) -> bool:
+        """
+        检测译文中是否违反了术语表规则
+
+        Args:
+            src: 原文
+            dst: 译文
+
+        Returns:
+            True - 术语表在原文中但译文未正确应用
+            False - 术语表正确应用或不适用
+        """
+        # 如果术语表未启用，直接返回 False
+        if not self.config.glossary_enable or not self.config.glossary_data:
+            return False
+
+        # 遍历术语表
+        for glossary_item in self.config.glossary_data:
+            glossary_src = glossary_item.get("src", "").strip()
+            glossary_dst = glossary_item.get("dst", "").strip()
+
+            # 跳过空术语
+            if not glossary_src or not glossary_dst:
+                continue
+
+            # 如果术语的原文在源文本中出现，但译文在目标文本中没有出现
+            if glossary_src in src and glossary_dst not in dst:
+                return True
+
+        return False
+
     def __init__(self, config: Config, items: list[CacheItem]) -> None:
         super().__init__()
 
@@ -88,10 +118,6 @@ class ResponseChecker(Base):
         # 数据解析失败
         if len(dsts) == 0 or all(v == "" or v == None for v in dsts):
             return [__class__.Error.FAIL_DATA] * len(srcs)
-
-        # 当翻译任务为单条目任务，且此条目已经是第二次单独重试时，直接返回，不进行后续判断
-        if len(self.items) == 1 and self.items[0].get_retry_count() >= __class__.RETRY_COUNT_THRESHOLD:
-            return [__class__.Error.NONE] * len(srcs)
 
         # 行数检查
         if len(srcs) != len(dsts):
@@ -111,6 +137,10 @@ class ResponseChecker(Base):
         for src, dst in zip(srcs, dsts):
             src = src.strip()
             dst = dst.strip()
+
+            # 保存原始的 src 和 dst，用于术语表检测
+            src_original = src
+            dst_original = dst
 
             # 原文不为空而译文为空时，判断为错误翻译
             if src != "" and dst == "":
@@ -156,6 +186,11 @@ class ResponseChecker(Base):
                 if __class__.has_source_language_residue(dst, self.config.source_language):
                     checks.append(__class__.Error.LINE_ERROR_SOURCE_RESIDUE)
                     continue
+
+            # 术语表检测（使用原始文本，避免代码保护规则的影响）
+            if self.has_glossary_violation(src_original, dst_original):
+                checks.append(__class__.Error.LINE_ERROR_GLOSSARY_VIOLATION)
+                continue
 
             # 判断是否包含或相似
             if src in dst or dst in src or TextHelper.check_similarity_by_jaccard(src, dst) > 0.80 == True:
